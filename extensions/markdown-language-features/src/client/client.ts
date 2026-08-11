@@ -69,6 +69,19 @@ export async function startClient(factory: LanguageClientConstructor, parser: IM
 
 	const mdFileGlob = `**/*.{${markdownFileExtensions.join(',')}}`;
 
+	function stripHashPrefix(symbols: vscode.DocumentSymbol[]): void {
+		for (const symbol of symbols) {
+			// The markdown language server assigns SymbolKind.String to headers
+			// and SymbolKind.Constant to link definitions. Only strip # from headers.
+			if (symbol.kind === vscode.SymbolKind.String && symbol.name.startsWith('#')) {
+				symbol.name = symbol.name.replace(/^#+\s*/, '');
+			}
+			if (symbol.children?.length) {
+				stripHashPrefix(symbol.children);
+			}
+		}
+	}
+
 	const clientOptions: lsp.LanguageClientOptions = {
 		documentSelector: markdownLanguageIds,
 		synchronize: {
@@ -88,7 +101,20 @@ export async function startClient(factory: LanguageClientConstructor, parser: IM
 		},
 		markdown: {
 			supportHtml: true,
-		}
+		},
+		middleware: {
+			provideDocumentSymbols(document, token, next) {
+				const result = next(document, token);
+				if (result instanceof Promise) {
+					return result.then(symbols => {
+						if (symbols) { stripHashPrefix(symbols as vscode.DocumentSymbol[]); }
+						return symbols;
+					});
+				}
+				if (result) { stripHashPrefix(result as vscode.DocumentSymbol[]); }
+				return result;
+			},
+		},
 	};
 
 	const client = factory('markdown', vscode.l10n.t("Markdown Language Server"), clientOptions);
